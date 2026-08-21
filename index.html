@@ -110,6 +110,28 @@ h1 {
 }
 .add-form button:hover { filter: brightness(1.08); }
 .add-form button:active { transform: scale(0.97); }
+
+.spotify-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid var(--line);
+  background: #1DB954;
+  color: #04120a;
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-weight: 800;
+  font-size: 0.95rem;
+  cursor: pointer;
+  margin-bottom: 12px;
+  transition: filter 0.15s, transform 0.08s;
+}
+.spotify-btn:hover { filter: brightness(1.08); }
+.spotify-btn:active { transform: scale(0.98); }
+.spotify-btn.is-loading { opacity: 0.7; cursor: wait; }
+.spotify-btn.is-connected { background: var(--card-2); color: var(--text); border-color: #1DB954; }
 @media (max-width: 480px) {
   .add-form .score-row { grid-template-columns: 1fr 1fr; }
   .add-form .score-row button { grid-column: 1 / -1; }
@@ -279,6 +301,7 @@ h1 {
   </div>
 
   <div class="add-card">
+    <button type="button" id="spotify-btn" class="spotify-btn">🎧 Ligar Spotify</button>
     <form class="add-form" id="add-form">
       <input type="text" id="new-song" placeholder="Nome da música" required />
       <div class="score-row">
@@ -562,6 +585,158 @@ document.getElementById('sound-toggle').addEventListener('click', () => {
   soundOn = !soundOn;
   document.getElementById('sound-toggle').textContent = soundOn ? '🔊' : '🔇';
 });
+
+// ---- Spotify "puxar música atual" (PKCE, sem client secret) ----
+const SPOTIFY_CLIENT_ID = '158c33d5f8764824b0d07116e82e28c0';
+const SPOTIFY_REDIRECT_URI = window.location.origin + '/callback';
+const SPOTIFY_SCOPE = 'user-read-currently-playing user-read-playback-state';
+const spotifyBtn = document.getElementById('spotify-btn');
+
+function base64url(bytes) {
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+async function sha256(str) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return base64url(new Uint8Array(digest));
+}
+function randomVerifier() {
+  const bytes = crypto.getRandomValues(new Uint8Array(64));
+  return base64url(bytes);
+}
+
+function getSpotifyTokens() {
+  try { return JSON.parse(localStorage.getItem('spotify_tokens') || 'null'); } catch (e) { return null; }
+}
+function setSpotifyTokens(tokens) {
+  localStorage.setItem('spotify_tokens', JSON.stringify(tokens));
+}
+
+async function startSpotifyLogin() {
+  const verifier = randomVerifier();
+  const challenge = await sha256(verifier);
+  localStorage.setItem('spotify_verifier', verifier);
+  const params = new URLSearchParams({
+    client_id: SPOTIFY_CLIENT_ID,
+    response_type: 'code',
+    redirect_uri: SPOTIFY_REDIRECT_URI,
+    code_challenge_method: 'S256',
+    code_challenge: challenge,
+    scope: SPOTIFY_SCOPE
+  });
+  window.location.href = 'https://accounts.spotify.com/authorize?' + params.toString();
+}
+
+async function exchangeCodeForToken(code) {
+  const verifier = localStorage.getItem('spotify_verifier');
+  const body = new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: SPOTIFY_REDIRECT_URI,
+    client_id: SPOTIFY_CLIENT_ID,
+    code_verifier: verifier
+  });
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body
+  });
+  if (!res.ok) throw new Error('token exchange failed');
+  const data = await res.json();
+  setSpotifyTokens({ access_token: data.access_token, refresh_token: data.refresh_token, expires_at: Date.now() + data.expires_in * 1000 });
+}
+
+async function refreshSpotifyToken(tokens) {
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: tokens.refresh_token,
+    client_id: SPOTIFY_CLIENT_ID
+  });
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body
+  });
+  if (!res.ok) throw new Error('refresh failed');
+  const data = await res.json();
+  const newTokens = {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token || tokens.refresh_token,
+    expires_at: Date.now() + data.expires_in * 1000
+  };
+  setSpotifyTokens(newTokens);
+  return newTokens;
+}
+
+async function getValidAccessToken() {
+  let tokens = getSpotifyTokens();
+  if (!tokens) return null;
+  if (Date.now() > tokens.expires_at - 10000) {
+    tokens = await refreshSpotifyToken(tokens);
+  }
+  return tokens.access_token;
+}
+
+function updateSpotifyButton() {
+  const connected = !!getSpotifyTokens();
+  spotifyBtn.textContent = connected ? '🎧 Puxar música atual' : '🎧 Ligar Spotify';
+  spotifyBtn.classList.toggle('is-connected', connected);
+}
+
+async function fetchCurrentlyPlaying() {
+  const token = await getValidAccessToken();
+  if (!token) { startSpotifyLogin(); return; }
+
+  spotifyBtn.classList.add('is-loading');
+  try {
+    const res = await fetch('https://api.spotify.com/v1/me/player/currently-playing', {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    if (res.status === 204) {
+      alert('Nada tocando no Spotify agora.');
+      return;
+    }
+    if (res.status === 401) {
+      localStorage.removeItem('spotify_tokens');
+      updateSpotifyButton();
+      alert('Sessão do Spotify expirou, clica de novo pra logar.');
+      return;
+    }
+    if (!res.ok) throw new Error('spotify api error');
+    const data = await res.json();
+    if (!data || !data.item) { alert('Nada tocando no Spotify agora.'); return; }
+    const artists = data.item.artists.map((a) => a.name).join(', ');
+    document.getElementById('new-song').value = artists + ' - ' + data.item.name;
+    document.getElementById('new-song').focus();
+  } catch (e) {
+    console.error(e);
+    alert('Não consegui buscar a música do Spotify.');
+  } finally {
+    spotifyBtn.classList.remove('is-loading');
+  }
+}
+
+spotifyBtn.addEventListener('click', () => {
+  if (getSpotifyTokens()) {
+    fetchCurrentlyPlaying();
+  } else {
+    startSpotifyLogin();
+  }
+});
+
+(async function handleSpotifyCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  if (code) {
+    try {
+      await exchangeCodeForToken(code);
+    } catch (e) {
+      console.error(e);
+      alert('Falha ao conectar com o Spotify.');
+    }
+    window.history.replaceState({}, '', '/');
+  }
+  updateSpotifyButton();
+})();
 </script>
 
 
