@@ -701,7 +701,10 @@ async function fetchCurrentlyPlaying() {
       alert('Sessão do Spotify expirou, clica de novo pra logar.');
       return;
     }
-    if (!res.ok) throw new Error('spotify api error');
+    if (!res.ok) {
+      const bodyText = await res.text().catch(() => '');
+      throw new Error('spotify api error ' + res.status + ' ' + bodyText);
+    }
     const data = await res.json();
     if (!data || !data.item) { alert('Nada tocando no Spotify agora.'); return; }
     const artists = data.item.artists.map((a) => a.name).join(', ');
@@ -709,7 +712,7 @@ async function fetchCurrentlyPlaying() {
     document.getElementById('new-song').focus();
   } catch (e) {
     console.error(e);
-    alert('Não consegui buscar a música do Spotify.');
+    alert('Não consegui buscar a música do Spotify: ' + e.message);
   } finally {
     spotifyBtn.classList.remove('is-loading');
   }
