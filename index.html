@@ -708,8 +708,17 @@ async function fetchCurrentlyPlaying() {
     const data = await res.json();
     if (!data || !data.item) { alert('Nada tocando no Spotify agora.'); return; }
     const artists = data.item.artists.map((a) => a.name).join(', ');
-    document.getElementById('new-song').value = artists + ' - ' + data.item.name;
-    document.getElementById('new-song').focus();
+    const songName = artists + ' - ' + data.item.name;
+
+    const { data: row, error } = await sb.from(TABLE).insert({ song: songName, eloa: null, manu: null }).select().single();
+    if (error) throw error;
+    renderRow(row);
+    playAddSound();
+    const entry = rowsById.get(row.id);
+    if (entry) {
+      const rect = entry.card.getBoundingClientRect();
+      confettiBurst(rect.left + rect.width / 2, rect.top + 20);
+    }
   } catch (e) {
     console.error(e);
     alert('Não consegui buscar a música do Spotify: ' + e.message);
