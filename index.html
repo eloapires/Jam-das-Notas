@@ -444,11 +444,12 @@ function buildCard(row) {
   nameDiv.className = 'song-name';
   nameDiv.contentEditable = 'true';
   nameDiv.textContent = row.song;
-  nameDiv.addEventListener('blur', () => {
+  nameDiv.addEventListener('blur', async () => {
     const val = nameDiv.textContent.trim();
     if (val && val !== row.song) {
       row.song = val;
-      sb.from(TABLE).update({ song: val }).eq('id', row.id);
+      const { error } = await sb.from(TABLE).update({ song: val }).eq('id', row.id);
+      if (error) { console.error(error); alert('Não consegui salvar o nome da música, tenta de novo.'); }
     }
   });
 
@@ -462,11 +463,16 @@ function buildCard(row) {
     input.type = 'number';
     input.min = '0'; input.max = '10'; input.step = '0.5';
     input.value = (row[field] === null || row[field] === undefined) ? '' : row[field];
-    input.addEventListener('change', () => {
+    input.addEventListener('change', async () => {
       const val = parseFloat(input.value);
       if (isNaN(val)) return;
       row[field] = val;
-      sb.from(TABLE).update({ [field]: val }).eq('id', row.id);
+      const { error } = await sb.from(TABLE).update({ [field]: val }).eq('id', row.id);
+      if (error) {
+        console.error(error);
+        alert('Não consegui salvar essa nota, tenta de novo.');
+        return;
+      }
       input.classList.remove('flash');
       void input.offsetWidth;
       input.classList.add('flash');
