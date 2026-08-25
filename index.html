@@ -137,6 +137,19 @@ h1 {
   .add-form .score-row button { grid-column: 1 / -1; }
 }
 
+.list-toolbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.clear-all-btn {
+  border: 1px solid var(--line);
+  background: var(--card-2);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.clear-all-btn:hover { background: var(--red); color: #fff; border-color: var(--red); }
 #song-list { display: flex; flex-direction: column; gap: 16px; }
 
 .song-card {
@@ -312,6 +325,9 @@ h1 {
     </form>
   </div>
 
+  <div class="list-toolbar">
+    <button type="button" id="clear-all-btn" class="clear-all-btn">🗑️ Limpar tudo</button>
+  </div>
   <div id="song-list"></div>
   <p id="loading-hint" class="empty-hint">Carregando...</p>
 </div>
@@ -584,6 +600,21 @@ form.addEventListener('submit', async (e) => {
 document.getElementById('sound-toggle').addEventListener('click', () => {
   soundOn = !soundOn;
   document.getElementById('sound-toggle').textContent = soundOn ? '🔊' : '🔇';
+});
+
+document.getElementById('clear-all-btn').addEventListener('click', async () => {
+  if (!confirm('Apagar TODAS as músicas da lista? Isso vale pra você e pra Manu, não tem como desfazer.')) return;
+  const clearBtn = document.getElementById('clear-all-btn');
+  clearBtn.disabled = true;
+  const { error } = await sb.from(TABLE).delete().not('id', 'is', null);
+  clearBtn.disabled = false;
+  if (error) {
+    console.error(error);
+    alert('Não consegui limpar a lista, tenta de novo.');
+    return;
+  }
+  list.innerHTML = '';
+  rowsById.clear();
 });
 
 // ---- Spotify "puxar música atual" (PKCE, sem client secret) ----
