@@ -73,7 +73,7 @@ h1 {
 }
 .add-form .score-row {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: repeat(4, 1fr) auto;
   gap: 10px;
 }
 .add-form input {
@@ -136,6 +136,10 @@ h1 {
   .add-form .score-row { grid-template-columns: 1fr 1fr; }
   .add-form .score-row button { grid-column: 1 / -1; }
 }
+@media (min-width: 481px) and (max-width: 700px) {
+  .add-form .score-row { grid-template-columns: 1fr 1fr 1fr 1fr; }
+  .add-form .score-row button { grid-column: 1 / -1; }
+}
 
 .list-toolbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
 .clear-all-btn {
@@ -157,8 +161,8 @@ h1 {
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 16px 18px;
-  display: grid;
-  grid-template-columns: 1fr auto auto auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 14px;
   box-shadow: 0 8px 20px rgba(0,0,0,0.35);
@@ -180,6 +184,7 @@ h1 {
   border-radius: 8px;
   min-width: 0;
   overflow-wrap: anywhere;
+  flex: 1 1 180px;
 }
 .song-name:focus { background: var(--card-2); }
 
@@ -212,6 +217,8 @@ h1 {
 .score-input:hover { border-color: var(--accent); }
 .score-input.eloa:focus, .score-input.eloa:hover { color: var(--accent); border-color: var(--accent); }
 .score-input.manu:focus, .score-input.manu:hover { color: var(--accent); border-color: var(--accent); }
+.score-input.matheus:focus, .score-input.matheus:hover { color: var(--accent); border-color: var(--accent); }
+.score-input.fabio:focus, .score-input.fabio:hover { color: var(--accent); border-color: var(--accent); }
 .score-input::-webkit-outer-spin-button, .score-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
 .score-input.flash { animation: flash-score 0.5s ease; }
@@ -320,6 +327,8 @@ h1 {
       <div class="score-row">
         <input type="number" id="new-eloa" placeholder="Eloá" min="0" max="10" step="0.5" />
         <input type="number" id="new-manu" placeholder="Manu" min="0" max="10" step="0.5" />
+        <input type="number" id="new-matheus" placeholder="Matheus" min="0" max="10" step="0.5" />
+        <input type="number" id="new-fabio" placeholder="Fabio" min="0" max="10" step="0.5" />
         <button type="submit">➕ Add</button>
       </div>
     </form>
@@ -488,6 +497,8 @@ function buildCard(row) {
 
   const eloaPill = makePill('Eloá', 'eloa', 'eloa');
   const manuPill = makePill('Manu', 'manu', 'manu');
+  const matheusPill = makePill('Matheus', 'matheus', 'matheus');
+  const fabioPill = makePill('Fabio', 'fabio', 'fabio');
 
   const delBtn = document.createElement('button');
   delBtn.className = 'del-btn';
@@ -510,8 +521,8 @@ function buildCard(row) {
     rowsById.delete(row.id);
   });
 
-  card.append(nameDiv, eloaPill.pill, manuPill.pill, delBtn);
-  return { card, eloaInput: eloaPill.input, manuInput: manuPill.input };
+  card.append(nameDiv, eloaPill.pill, manuPill.pill, matheusPill.pill, fabioPill.pill, delBtn);
+  return { card, eloaInput: eloaPill.input, manuInput: manuPill.input, matheusInput: matheusPill.input, fabioInput: fabioPill.input };
 }
 
 function renderRow(row) {
@@ -529,7 +540,7 @@ function applyRemoteUpdate(row) {
     nameDiv.textContent = row.song;
   }
   entry.row.song = row.song;
-  ['eloa', 'manu'].forEach((field) => {
+  ['eloa', 'manu', 'matheus', 'fabio'].forEach((field) => {
     const input = entry.card.querySelector('.score-input.' + field);
     if (!input) return;
     const newVal = (row[field] === null || row[field] === undefined) ? '' : String(row[field]);
@@ -580,13 +591,17 @@ form.addEventListener('submit', async (e) => {
   const nameInput = document.getElementById('new-song');
   const eloaInput = document.getElementById('new-eloa');
   const manuInput = document.getElementById('new-manu');
+  const matheusInput = document.getElementById('new-matheus');
+  const fabioInput = document.getElementById('new-fabio');
   const name = nameInput.value.trim();
   if (!name) return;
 
   const eloaVal = eloaInput.value ? parseFloat(eloaInput.value) : null;
   const manuVal = manuInput.value ? parseFloat(manuInput.value) : null;
+  const matheusVal = matheusInput.value ? parseFloat(matheusInput.value) : null;
+  const fabioVal = fabioInput.value ? parseFloat(fabioInput.value) : null;
 
-  const { data, error } = await sb.from(TABLE).insert({ song: name, eloa: eloaVal, manu: manuVal }).select().single();
+  const { data, error } = await sb.from(TABLE).insert({ song: name, eloa: eloaVal, manu: manuVal, matheus: matheusVal, fabio: fabioVal }).select().single();
   if (error) { console.error(error); return; }
 
   renderRow(data);
@@ -600,6 +615,8 @@ form.addEventListener('submit', async (e) => {
   nameInput.value = '';
   eloaInput.value = '';
   manuInput.value = '';
+  matheusInput.value = '';
+  fabioInput.value = '';
   nameInput.focus();
 });
 
@@ -747,7 +764,7 @@ async function fetchCurrentlyPlaying() {
     const artists = data.item.artists.map((a) => a.name).join(', ');
     const songName = artists + ' - ' + data.item.name;
 
-    const { data: row, error } = await sb.from(TABLE).insert({ song: songName, eloa: null, manu: null }).select().single();
+    const { data: row, error } = await sb.from(TABLE).insert({ song: songName, eloa: null, manu: null, matheus: null, fabio: null }).select().single();
     if (error) throw error;
     renderRow(row);
     playAddSound();
