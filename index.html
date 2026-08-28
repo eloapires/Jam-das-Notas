@@ -66,6 +66,34 @@ h1 {
   box-shadow: 0 12px 28px rgba(0,0,0,0.4);
   margin-bottom: 22px;
 }
+.session-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.session-bar select {
+  flex: 1;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+.session-bar button {
+  border: 1px solid var(--line);
+  background: var(--card-2);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s;
+}
+.session-bar button:hover { border-color: var(--accent); color: var(--accent); }
 .add-form {
   display: grid;
   grid-template-columns: 1fr;
@@ -320,6 +348,11 @@ h1 {
     <p class="sub">Eloá &amp; Manu avaliam as músicas — de 0 a 10!</p>
   </div>
 
+  <div class="session-bar">
+    <select id="session-select"></select>
+    <button type="button" id="new-session-btn">➕ Nova sessão</button>
+  </div>
+
   <div class="add-card">
     <button type="button" id="spotify-btn" class="spotify-btn">🎧 Ligar Spotify</button>
     <form class="add-form" id="add-form">
@@ -563,19 +596,68 @@ function applyRemoteUpdate(row) {
   });
 }
 
+const SESSIONS_TABLE = 'jam_sessions';
+const sessionSelect = document.getElementById('session-select');
+let currentSessionId = null;
+
 async function loadAll() {
+  if (!currentSessionId) return;
+  list.innerHTML = '';
+  rowsById.clear();
   const hint = document.getElementById('loading-hint');
-  const { data, error } = await sb.from(TABLE).select('*').order('created_at', { ascending: true });
   if (hint) hint.remove();
+  const { data, error } = await sb.from(TABLE).select('*').eq('session_id', currentSessionId).order('created_at', { ascending: true });
   if (error) { console.error(error); return; }
   (data || []).forEach(renderRow);
 }
 
+async function loadSessions(selectId) {
+  const { data, error } = await sb.from(SESSIONS_TABLE).select('*').order('created_at', { ascending: false });
+  if (error) { console.error(error); return; }
+  const sessions = data || [];
+  sessionSelect.innerHTML = '';
+  sessions.forEach((s) => {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.name;
+    sessionSelect.appendChild(opt);
+  });
+  const targetId = selectId || (sessions[0] && sessions[0].id) || null;
+  if (targetId) {
+    sessionSelect.value = targetId;
+    if (currentSessionId !== targetId) {
+      currentSessionId = targetId;
+      loadAll();
+    }
+  }
+}
+
+sessionSelect.addEventListener('change', () => {
+  currentSessionId = sessionSelect.value;
+  loadAll();
+});
+
+document.getElementById('new-session-btn').addEventListener('click', async () => {
+  const name = prompt('Nome da nova sessão (ex: data ou "Jam de sábado"):', new Date().toLocaleDateString('pt-BR'));
+  if (!name || !name.trim()) return;
+  const { data, error } = await sb.from(SESSIONS_TABLE).insert({ name: name.trim() }).select().single();
+  if (error) { console.error(error); alert('Não consegui criar a sessão.'); return; }
+  await loadSessions(data.id);
+});
+
+sb.channel('jam_sessions_changes')
+  .on('postgres_changes', { event: 'INSERT', schema: 'public', table: SESSIONS_TABLE }, () => {
+    loadSessions(currentSessionId);
+  })
+  .subscribe();
+
 sb.channel('jam_notas_changes')
   .on('postgres_changes', { event: 'INSERT', schema: 'public', table: TABLE }, (payload) => {
+    if (payload.new.session_id !== currentSessionId) return;
     renderRow(payload.new);
   })
   .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: TABLE }, (payload) => {
+    if (payload.new.session_id !== currentSessionId) return;
     applyRemoteUpdate(payload.new);
   })
   .on('postgres_changes', { event: 'DELETE', schema: 'public', table: TABLE }, (payload) => {
@@ -584,7 +666,7 @@ sb.channel('jam_notas_changes')
   })
   .subscribe();
 
-loadAll();
+loadSessions();
 
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -601,7 +683,7 @@ form.addEventListener('submit', async (e) => {
   const matheusVal = matheusInput.value ? parseFloat(matheusInput.value) : null;
   const fabioVal = fabioInput.value ? parseFloat(fabioInput.value) : null;
 
-  const { data, error } = await sb.from(TABLE).insert({ song: name, eloa: eloaVal, manu: manuVal, matheus: matheusVal, fabio: fabioVal }).select().single();
+  const { data, error } = await sb.from(TABLE).insert({ song: name, eloa: eloaVal, manu: manuVal, matheus: matheusVal, fabio: fabioVal, session_id: currentSessionId }).select().single();
   if (error) { console.error(error); return; }
 
   renderRow(data);
@@ -626,10 +708,10 @@ document.getElementById('sound-toggle').addEventListener('click', () => {
 });
 
 document.getElementById('clear-all-btn').addEventListener('click', async () => {
-  if (!confirm('Apagar TODAS as músicas da lista? Isso vale pra você e pra Manu, não tem como desfazer.')) return;
+  if (!confirm('Apagar TODAS as músicas dessa sessão? Isso vale pra todo mundo, não tem como desfazer.')) return;
   const clearBtn = document.getElementById('clear-all-btn');
   clearBtn.disabled = true;
-  const { error } = await sb.from(TABLE).delete().not('id', 'is', null);
+  const { error } = await sb.from(TABLE).delete().eq('session_id', currentSessionId);
   clearBtn.disabled = false;
   if (error) {
     console.error(error);
@@ -764,7 +846,7 @@ async function fetchCurrentlyPlaying() {
     const artists = data.item.artists.map((a) => a.name).join(', ');
     const songName = artists + ' - ' + data.item.name;
 
-    const { data: row, error } = await sb.from(TABLE).insert({ song: songName, eloa: null, manu: null, matheus: null, fabio: null }).select().single();
+    const { data: row, error } = await sb.from(TABLE).insert({ song: songName, eloa: null, manu: null, matheus: null, fabio: null, session_id: currentSessionId }).select().single();
     if (error) throw error;
     renderRow(row);
     playAddSound();
