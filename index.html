@@ -94,6 +94,8 @@ h1 {
   transition: border-color 0.15s, color 0.15s;
 }
 .session-bar button:hover { border-color: var(--accent); color: var(--accent); }
+#delete-session-btn { flex: 0 0 auto; }
+#delete-session-btn:hover { border-color: var(--red); color: var(--red); }
 .add-form {
   display: grid;
   grid-template-columns: 1fr;
@@ -351,6 +353,7 @@ h1 {
   <div class="session-bar">
     <select id="session-select"></select>
     <button type="button" id="new-session-btn">➕ Nova sessão</button>
+    <button type="button" id="delete-session-btn" title="Apagar essa sessão">🗑️</button>
   </div>
 
   <div class="add-card">
@@ -645,9 +648,52 @@ document.getElementById('new-session-btn').addEventListener('click', async () =>
   await loadSessions(data.id);
 });
 
+document.getElementById('delete-session-btn').addEventListener('click', async () => {
+  if (!currentSessionId) return;
+  const sessionName = sessionSelect.options[sessionSelect.selectedIndex]?.textContent || 'essa sessão';
+  if (!confirm('Apagar a sessão "' + sessionName + '" e todas as músicas/notas dela? Não tem como desfazer.')) return;
+
+  const deleteBtn = document.getElementById('delete-session-btn');
+  deleteBtn.disabled = true;
+  const sessionToDelete = currentSessionId;
+
+  const { error: songsError } = await sb.from(TABLE).delete().eq('session_id', sessionToDelete);
+  if (songsError) {
+    console.error(songsError);
+    deleteBtn.disabled = false;
+    alert('Não consegui apagar as músicas dessa sessão.');
+    return;
+  }
+
+  const { error: sessionError } = await sb.from(SESSIONS_TABLE).delete().eq('id', sessionToDelete);
+  deleteBtn.disabled = false;
+  if (sessionError) {
+    console.error(sessionError);
+    alert('Não consegui apagar a sessão.');
+    return;
+  }
+
+  currentSessionId = null;
+  const { data: remaining } = await sb.from(SESSIONS_TABLE).select('*').order('created_at', { ascending: false }).limit(1);
+  if (remaining && remaining.length) {
+    await loadSessions(remaining[0].id);
+  } else {
+    const { data: fresh } = await sb.from(SESSIONS_TABLE).insert({ name: new Date().toLocaleDateString('pt-BR') }).select().single();
+    await loadSessions(fresh && fresh.id);
+  }
+});
+
 sb.channel('jam_sessions_changes')
   .on('postgres_changes', { event: 'INSERT', schema: 'public', table: SESSIONS_TABLE }, () => {
     loadSessions(currentSessionId);
+  })
+  .on('postgres_changes', { event: 'DELETE', schema: 'public', table: SESSIONS_TABLE }, (payload) => {
+    if (payload.old.id === currentSessionId) {
+      currentSessionId = null;
+      loadSessions();
+    } else {
+      loadSessions(currentSessionId);
+    }
   })
   .subscribe();
 
